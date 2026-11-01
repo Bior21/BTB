@@ -14,6 +14,7 @@ There are 100 levels to complete.
 
 import asyncio
 import doctest
+from array import array
 import math
 import os
 import random
@@ -61,11 +62,24 @@ BACKGROUND = (21, 34, 31)
 WALL = (53, 73, 63)
 CORRIDOR = (16, 26, 24)
 TEXT = (237, 242, 235)
-MUTED = (181, 198, 187)
+MUTED = (205, 218, 209)
+DISABLED = (135, 152, 141)
 BLUE = (159, 216, 229)
 GOLD = (232, 200, 140)
 ORANGE = (224, 164, 126)
 GREEN = (195, 223, 139)
+FONT_SIZES = (42, 28, 24)
+BOTTOM_ROW = 732
+BOTTOM_HEIGHT = 54
+INSTRUCTIONS = ["Press Start, then drag the blue dot, tap the maze, or use arrows / WASD.",
+                "Reach any gold exit before the countdown ends. Too many steps also sets off the bomb."]
+TIPS = ["Pause hides the maze and freezes the countdown.",
+        "The Steps box turns orange when you are close to the step limit.",
+        "Take a shortest route for a +250 bonus.",
+        "Unlock the next level: pass 10 mazes and earn 5,000 net level points.",
+        "Restarting a live attempt costs 100 points and counts as a failure.",
+        "Three failures in a row send you back to the previous level.",
+        "Press M or the Sound button to mute."]
 
 
 # ----------------------------------------------------------------------
@@ -767,6 +781,15 @@ class Game:
         if self.player.steps > self.step_limit or self.player.position in self.maze.exits:
             self.finish_attempt()
 
+    def steps_running_low(self):
+        """Return True during an attempt once a tenth of the step limit (at least 3) remains.
+
+        The limit itself stays hidden; this only warns that it is close.
+        """
+        if self.mode not in ("playing", "paused"):
+            return False
+        return self.step_limit - self.player.steps <= max(3, self.step_limit // 10)
+
     def finish_attempt(self):
         """Freeze an exit or over-limit result, post its score, and check progression."""
         if self.mode != "playing" or self.check_bomb():
@@ -957,6 +980,28 @@ def screen_position_to_cell(position, geometry):
     return (int((position[0] - left) // size), int((position[1] - top) // size))
 
 
+def step_toward(start, target):
+    """Return the one-cell move from start toward target along the longer axis.
+
+    Tapping anywhere on the board moves one cell, so small cells on a phone
+    do not have to be hit exactly.
+
+    >>> step_toward((2, 2), (5, 3))
+    (1, 0)
+    >>> step_toward((2, 2), (2, 0))
+    (0, -1)
+    >>> step_toward((2, 2), (2, 2))
+    (0, 0)
+    """
+    dx = target[0] - start[0]
+    dy = target[1] - start[1]
+    if dx == dy == 0:
+        return (0, 0)
+    if abs(dx) >= abs(dy):
+        return (1 if dx > 0 else -1, 0)
+    return (0, 1 if dy > 0 else -1)
+
+
 def drag_segment(game, before, after):
     """Request moves along the mouse's path between two screen positions.
 
@@ -980,6 +1025,11 @@ def drag_segment(game, before, after):
 # ----------------------------------------------------------------------
 # Drawing reads the current game state and builds the visible controls.
 
+def make_fonts(pygame):
+    """Return the title, body, and small fonts, sized to stay readable when scaled down."""
+    return tuple(pygame.font.Font(None, size) for size in FONT_SIZES)
+
+
 def draw_text(screen, font, text, position, color=TEXT):
     """Draw text at the given pixel position."""
     screen.blit(font.render(text, True, color), position)
@@ -999,14 +1049,16 @@ def draw_wrapped_text(screen, font, text, x, y, width, color=TEXT):
     draw_text(screen, font, line, (x, y), color)
 
 
-def make_buttons(pygame, game):
-    """Return level, attempt, and movement button descriptions for this frame."""
+def make_buttons(pygame, game, sound_on=True):
+    """Return level, attempt, movement, and sound button descriptions for this frame."""
     buttons = make_level_buttons(pygame, game)
     buttons.extend(make_attempt_buttons(pygame, game))
+    buttons.append(Button(label="Sound: on" if sound_on else "Sound: off",
+                          rect=pygame.Rect(812, 18, 118, 34), action="sound"))
     labels = ["<", "^", "v", ">"]
     directions = [(-1, 0), (0, -1), (0, 1), (1, 0)]
     for index, (label, direction) in enumerate(zip(labels, directions)):
-        rect = pygame.Rect(704 + index * 55, 737, 46, 42)
+        rect = pygame.Rect(669 + index * 66, BOTTOM_ROW, 60, BOTTOM_HEIGHT)
         buttons.append(Button(label=label, rect=rect, action="move",
                               value=direction, enabled=game.mode != "finished"))
     return buttons
@@ -1017,7 +1069,7 @@ def make_level_buttons(pygame, game):
     buttons = []
     for offset in range(10):
         index = game.level_page * 10 + offset
-        rect = pygame.Rect(82 + offset * 79, 182, 73, 34)
+        rect = pygame.Rect(82 + offset * 79, 182, 75, 34)
         enabled = index <= game.highest_unlocked_level and (index <= game.level or game.level_ready())
         buttons.append(Button(label=f"Level {index + 1}", rect=rect,
                               action="level", value=index, enabled=enabled))
@@ -1030,8 +1082,8 @@ def make_level_buttons(pygame, game):
 
 def make_attempt_buttons(pygame, game):
     """Build retry, play, advance, and previous-level recovery controls from the game state."""
-    retry_rect = pygame.Rect(162, 737, 155, 42)
-    next_rect = pygame.Rect(329, 737, 135, 42)
+    retry_rect = pygame.Rect(162, BOTTOM_ROW, 155, BOTTOM_HEIGHT)
+    next_rect = pygame.Rect(329, BOTTOM_ROW, 135, BOTTOM_HEIGHT)
     can_retry = game.level <= game.highest_unlocked_level
     level_done = game.level_ready()
     can_advance = game.mode == "finished" and game.passed and (not level_done or game.level < len(LEVELS) - 1)
@@ -1042,7 +1094,7 @@ def make_attempt_buttons(pygame, game):
                make_play_button(pygame, game, can_retry),
                Button(label=next_label, rect=next_rect, action="next", enabled=can_advance)]
     if game.level > game.highest_unlocked_level:
-        rect = pygame.Rect(476, 737, 165, 42)
+        rect = pygame.Rect(476, BOTTOM_ROW, 165, BOTTOM_HEIGHT)
         buttons.append(Button(label="Previous level", rect=rect,
                               action="level", value=game.level - 1))
     return buttons
@@ -1051,18 +1103,18 @@ def make_attempt_buttons(pygame, game):
 def make_play_button(pygame, game, can_retry):
     """Return the Start, Pause, or Resume button for the current attempt mode."""
     labels = {"ready": "Start", "playing": "Pause", "paused": "Resume", "finished": "Start"}
-    return Button(label=labels[game.mode], rect=pygame.Rect(30, 737, 120, 42),
+    return Button(label=labels[game.mode], rect=pygame.Rect(30, BOTTOM_ROW, 120, BOTTOM_HEIGHT),
                   action="play", enabled=can_retry and game.mode != "finished")
 
 
-def draw_game(pygame, screen, fonts, game):
+def draw_game(pygame, screen, fonts, game, sound_on=True):
     """Draw the current screen and return its clickable button descriptions."""
     screen.fill(BACKGROUND)
     draw_heading(pygame, screen, fonts, game)
     draw_statistics(pygame, screen, fonts, game)
     draw_board(pygame, screen, fonts, game)
     draw_messages(screen, fonts, game)
-    buttons = make_buttons(pygame, game)
+    buttons = make_buttons(pygame, game, sound_on)
     for button in buttons:
         draw_button(pygame, screen, fonts[2], game, button)
     if game.level_popup:
@@ -1138,27 +1190,35 @@ def draw_level_popup(pygame, screen, fonts, game):
 def draw_heading(pygame, screen, fonts, game):
     """Draw the game title, level progress, and indented instructions."""
     title_font, font, small_font = fonts
-    draw_text(screen, title_font, "BEAT THE BLAST", (30, 20))
+    draw_text(screen, title_font, "BEAT THE BLAST", (30, 18))
     maze_number = min(MAZES_PER_LEVEL, game.solved_counts[game.level] + (not game.maze.cleared))
-    progress = f"Level {game.level + 1}/100 · Maze {maze_number}/10"
-    draw_text(screen, small_font, progress, (650, 28), MUTED)
-    draw_text(screen, font, "Instructions", (30, 61))
-    instructions = ["Drag or use arrows / WASD. Blue: you · Gold: any exit.",
-                    "Start when ready. Pause hides your maze and freezes the countdown.",
-                    "Escape before the bomb countdown reaches zero.",
-                    "Exceed the hidden step limit and the bomb explodes immediately.",
-                    "Unlock: 10 mazes + 5,000 net level points. Live restarts cost 100 points and a failure."]
-    for index, instruction in enumerate(instructions):
-        draw_instruction(pygame, screen, small_font, instruction, 85 + index * 18)
+    progress = small_font.render(f"Level {game.level + 1}/100 · Maze {maze_number}/10", True, MUTED)
+    screen.blit(progress, progress.get_rect(midright=(796, 35)))
+    for index, instruction in enumerate(INSTRUCTIONS):
+        draw_instruction(pygame, screen, small_font, instruction, 72 + index * 28)
+    draw_instruction(pygame, screen, small_font, current_tip(game), 140, "Tip: ")
 
 
-def draw_instruction(pygame, screen, font, text, top):
-    """Draw one instruction beside its four-diamond bullet."""
+def current_tip(game):
+    """Return one tip, moving to the next each time a maze is passed.
+
+    Showing one tip at a time keeps the opening screen short.
+    """
+    return TIPS[sum(game.solved_counts) % len(TIPS)]
+
+
+def draw_instruction(pygame, screen, font, text, top, label=""):
+    """Draw one instruction beside its four-diamond bullet, after an optional gold label."""
+    color = GOLD if label else MUTED
     for dx, dy in [(0, -3), (-3, 0), (3, 0), (0, 3)]:
-        x, y = 56 + dx, top + 7 + dy
+        x, y = 40 + dx, top + 8 + dy
         points = [(x, y - 2), (x + 2, y), (x, y + 2), (x - 2, y)]
-        pygame.draw.polygon(screen, MUTED, points)
-    draw_text(screen, font, text, (70, top), MUTED)
+        pygame.draw.polygon(screen, color, points)
+    left = 54
+    if label:
+        draw_text(screen, font, label, (left, top), GOLD)
+        left += font.size(label)[0]
+    draw_text(screen, font, text, (left, top), MUTED)
 
 
 def draw_statistics(pygame, screen, fonts, game):
@@ -1171,18 +1231,22 @@ def draw_statistics(pygame, screen, fonts, game):
               ("Negative finishes", f"{game.failures[game.level]} / {LOCK_AFTER_FAILURES}")]
     for index, (label, value) in enumerate(values):
         rect = pygame.Rect(30, 232 + index * 98, 170, 82)
-        color = ORANGE if label == "Bomb countdown" and remaining <= 10 else TEXT
+        low_steps = label == "Steps" and game.steps_running_low()
+        low_time = label == "Bomb countdown" and remaining <= 10
+        color = ORANGE if low_time or low_steps else TEXT
         draw_stat_box(pygame, screen, fonts, rect, label, value, color)
         if label == "Points":
             detail = f"Level {game.level_points[game.level]:,} / {LEVEL_POINTS_REQUIRED:,}"
-            draw_text(screen, fonts[2], detail, (rect.x + 12, rect.y + 63), MUTED)
+            draw_text(screen, fonts[2], detail, (rect.x + 12, rect.y + 58), MUTED)
+        if low_steps:
+            draw_text(screen, fonts[2], "Few steps left!", (rect.x + 12, rect.y + 58), ORANGE)
 
 
 def draw_stat_box(pygame, screen, fonts, rect, label, value, value_color=TEXT):
     """Draw a statistic label above its value, such as Bomb countdown above 12.4s."""
     pygame.draw.rect(screen, (40, 64, 56), rect, border_radius=4)
-    draw_text(screen, fonts[2], label, (rect.x + 12, rect.y + 12), MUTED)
-    draw_text(screen, fonts[1], value, (rect.x + 12, rect.y + 42), value_color)
+    draw_text(screen, fonts[2], label, (rect.x + 12, rect.y + 10), MUTED)
+    draw_text(screen, fonts[1], value, (rect.x + 12, rect.y + 32), value_color)
 
 
 def draw_blast_effect(pygame, screen, game, geometry):
@@ -1256,9 +1320,91 @@ def draw_button(pygame, screen, font, game, button):
     if button.action == "level" and button.value == game.level:
         fill = (71, 95, 65)
     pygame.draw.rect(screen, fill, button.rect, border_radius=4)
-    ink = TEXT if button.enabled else (109, 124, 114)
+    ink = TEXT if button.enabled else DISABLED
     text = font.render(button.label, True, ink)
     screen.blit(text, text.get_rect(center=button.rect.center))
+
+
+# ----------------------------------------------------------------------
+# SOUND EFFECTS
+# ----------------------------------------------------------------------
+# Effects are built from raw samples, so the game needs no audio files.
+
+class Sounds:
+    """Build and play short effects, staying silent when audio is unavailable."""
+
+    def __init__(self, pygame):
+        """Create the clock ticks, step warning, blast, and escape sounds once."""
+        self.pygame = pygame
+        self.enabled = True
+        self.effects = {}
+        try:
+            if not pygame.mixer.get_init():
+                pygame.mixer.init()
+            self.rate, size, self.channels = pygame.mixer.get_init()
+        except (pygame.error, TypeError):
+            return
+        if size != -16:
+            return
+        try:
+            self.effects = {
+                "tick": self.make(self.tone(880, 0.04, 0.2)),
+                "fast_tick": self.make(self.tone(1320, 0.05, 0.3)),
+                "warn": self.make(self.tone(520, 0.08, 0.3) + self.tone(0, 0.05, 0)
+                                  + self.tone(520, 0.08, 0.3)),
+                "blast": self.make(self.blast()),
+                "escape": self.make(self.notes([523, 659, 784])),
+                "perfect": self.make(self.notes([523, 659, 784, 1047])),
+                "unlock": self.make(self.notes([392, 523, 659, 784, 1047])),
+            }
+        except pygame.error:
+            self.effects = {}
+
+    def tone(self, frequency, seconds, volume):
+        """Return samples for a sine tone that fades out, from -1.0 to 1.0."""
+        count = int(self.rate * seconds)
+        step = 2 * math.pi * frequency / self.rate
+        return [volume * math.sin(step * index) * (1 - index / count) ** 2
+                for index in range(count)]
+
+    def notes(self, frequencies):
+        """Return samples for a quick rising run of notes."""
+        samples = []
+        for frequency in frequencies:
+            samples += self.tone(frequency, 0.11, 0.28)
+        return samples
+
+    def blast(self):
+        """Return samples for a rumbling explosion: smoothed noise over a low boom."""
+        noise = random.Random(7)
+        count = int(self.rate * 0.9)
+        samples = []
+        rumble = 0.0
+        for index in range(count):
+            rumble += (noise.uniform(-1, 1) - rumble) * 0.2
+            fade = (1 - index / count) ** 3
+            boom = math.sin(2 * math.pi * 55 * index / self.rate)
+            samples.append(fade * (1.6 * rumble + 0.35 * boom))
+        return samples
+
+    def make(self, samples):
+        """Pack samples as 16-bit audio for every mixer channel and return a Sound."""
+        data = array("h")
+        for sample in samples:
+            value = int(max(-1.0, min(1.0, sample)) * 32767)
+            data.extend([value] * self.channels)
+        return self.pygame.mixer.Sound(buffer=data.tobytes())
+
+    def play(self, name):
+        """Play an effect by name when sound is on and audio is available."""
+        if self.enabled and name in self.effects:
+            self.effects[name].play()
+
+    def toggle(self):
+        """Turn sound on or off, stopping anything still playing when muted."""
+        self.enabled = not self.enabled
+        if not self.enabled and self.effects:
+            self.pygame.mixer.stop()
 
 
 # ----------------------------------------------------------------------
@@ -1277,7 +1423,7 @@ class App:
         flags = 0 if sys.platform == "emscripten" else pygame.SCALED
         self.screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT), flags)
         pygame.display.set_caption("Beat the Blast")
-        self.fonts = (pygame.font.Font(None, 34), pygame.font.Font(None, 23), pygame.font.Font(None, 20))
+        self.fonts = make_fonts(pygame)
         self.clock = pygame.time.Clock()
         pygame.key.set_repeat(160, 90)
         self.game = Game()
@@ -1286,6 +1432,11 @@ class App:
         self.previous_mouse = None
         self.running = True
         self.key_directions = self.make_key_directions()
+        self.sounds = Sounds(pygame)
+        self.last_mode = self.game.mode
+        self.last_popup = False
+        self.last_beat = None
+        self.warned = False
 
     def make_key_directions(self):
         """Return the cell movement for each arrow or WASD key."""
@@ -1317,8 +1468,38 @@ class App:
         for event in self.pygame.event.get():
             self.handle_event(event)
         self.game.advance_after_popup()
-        self.buttons = draw_game(self.pygame, self.screen, self.fonts, self.game)
+        self.play_sounds()
+        self.buttons = draw_game(self.pygame, self.screen, self.fonts, self.game,
+                                 self.sounds.enabled)
         self.pygame.display.flip()
+
+    def play_sounds(self):
+        """Tick with the countdown, warn on low steps, and mark how an attempt ended.
+
+        The tick speeds up and rises in pitch for the last ten seconds.
+        """
+        game = self.game
+        beat = None
+        if game.mode == "playing":
+            remaining = game.time_remaining()
+            length = 0.5 if remaining <= 10 else 1.0
+            beat = (length, math.ceil(remaining / length))
+            if self.last_beat is not None and beat != self.last_beat:
+                self.sounds.play("fast_tick" if length < 1 else "tick")
+        self.last_beat = beat
+        warning = game.steps_running_low()
+        if warning and not self.warned:
+            self.sounds.play("warn")
+        self.warned = warning
+        if game.level_popup and not self.last_popup:
+            self.sounds.play("unlock")
+        elif game.mode == "finished" and self.last_mode == "playing":
+            if game.passed:
+                self.sounds.play("perfect" if game.perfect else "escape")
+            else:
+                self.sounds.play("blast")
+        self.last_mode = game.mode
+        self.last_popup = game.level_popup
 
     def handle_event(self, event):
         """Send keyboard and mouse events to the matching handler, or handle closing the window."""
@@ -1339,9 +1520,11 @@ class App:
 
     def handle_key(self, key):
         """Request movement or quit on Escape, unless the completion popup is showing."""
-        if self.game.level_popup:
+        if key == self.pygame.K_m:
+            self.sounds.toggle()
+        elif self.game.level_popup:
             return
-        if key in self.key_directions:
+        elif key in self.key_directions:
             dx, dy = self.key_directions[key]
             self.game.move(dx, dy)
         elif key == self.pygame.K_ESCAPE and sys.platform != "emscripten":
@@ -1350,17 +1533,17 @@ class App:
             self.running = False
 
     def handle_mouse_down(self, position):
-        """Handle buttons first; during play, start dragging or request a neighboring move."""
+        """Handle buttons first; during play, start dragging or step toward a tap on the board."""
         self.dragging = False
         if self.click_button(position) or self.game.mode != "playing":
             return
-        target = screen_position_to_cell(position, maze_geometry(self.game.maze))
+        maze = self.game.maze
+        target = screen_position_to_cell(position, maze_geometry(maze))
         if target == self.game.player.position:
             self.dragging = True
             self.previous_mouse = position
-        else:
-            x, y = self.game.player.position
-            self.game.move(target[0] - x, target[1] - y)
+        elif 0 <= target[0] < maze.width and 0 <= target[1] < maze.height:
+            self.game.move(*step_toward(self.game.player.position, target))
 
     def click_button(self, position):
         """Return True for a button hit and run its action only if the button is enabled."""
@@ -1387,6 +1570,8 @@ class App:
         elif action == "play":
             self.dragging = False
             self.game.toggle_play()
+        elif action == "sound":
+            self.sounds.toggle()
 
 
 # Keep the actual sample class available while tests replace SampleMaze.
@@ -1686,6 +1871,22 @@ class GameTests(unittest.TestCase):
         self.assertEqual(self.game.total_score, -33)
         self.assertEqual(self.game.failures[0], 1)
 
+    def test_low_step_warning_only_shows_during_an_attempt(self):
+        """TinyMaze's limit of 3 is already close, but only while playing or paused."""
+        self.assertFalse(self.game.steps_running_low())
+        self.game.toggle_play()
+        self.assertTrue(self.game.steps_running_low())
+        for step in range(3):
+            self.game.move(0, 1)
+        self.assertEqual(self.game.mode, 'finished')
+        self.assertFalse(self.game.steps_running_low())
+
+    def test_tip_changes_after_each_passed_maze(self):
+        """One tip shows at a time and the next appears after a pass."""
+        first = current_tip(self.game)
+        escape(self.game)
+        self.assertNotEqual(current_tip(self.game), first)
+
     def test_live_and_paused_retries_keep_layout_and_cost_points(self):
         """Each abandoned attempt costs once and returns the same maze to ready."""
         maze = self.game.maze
@@ -1838,8 +2039,7 @@ class InterfaceTests(unittest.TestCase):
         pygame.init()
         self.addCleanup(pygame.quit)
         self.screen = pygame.display.set_mode((960, 810))
-        self.fonts = (pygame.font.Font(None, 34), pygame.font.Font(None, 23),
-                      pygame.font.Font(None, 20))
+        self.fonts = make_fonts(pygame)
         maze_patch = patch(__name__ + '.Maze', TinyMaze)
         self.addCleanup(maze_patch.stop)
         maze_patch.start()
@@ -1885,6 +2085,30 @@ class InterfaceTests(unittest.TestCase):
         drag_segment(self.game, after, before)
         self.assertEqual(self.game.player.position, (4, 2))
 
+    def test_tapping_the_board_steps_once_toward_the_tap(self):
+        """A tap far from the player moves one cell; taps off the board do nothing."""
+        app = self.make_app()
+        self.game.toggle_play()
+        geometry = maze_geometry(self.game.maze)
+        app.handle_mouse_down(cell_center((5, 4), geometry))
+        self.assertEqual(self.game.player.position, (4, 3))
+        app.handle_mouse_down((5, 5))
+        self.assertEqual(self.game.player.position, (4, 3))
+
+    def test_sound_button_and_m_key_toggle_sound(self):
+        """The Sound button and M both mute and unmute, and the label follows."""
+        app = self.make_app()
+        button = next(button for button in make_buttons(pygame, self.game)
+                      if button.action == 'sound')
+        self.assertEqual(button.label, 'Sound: on')
+        app.buttons = [button]
+        app.click_button(button.rect.center)
+        self.assertFalse(app.sounds.enabled)
+        muted = make_buttons(pygame, self.game, app.sounds.enabled)
+        self.assertIn('Sound: off', [button.label for button in muted])
+        app.handle_key(pygame.K_m)
+        self.assertTrue(app.sounds.enabled)
+
     def make_app(self):
         """Use App's real input methods without opening its scaled window."""
         app = App.__new__(App)
@@ -1894,6 +2118,7 @@ class InterfaceTests(unittest.TestCase):
         app.running = True
         app.buttons = []
         app.key_directions = app.make_key_directions()
+        app.sounds = Sounds(pygame)
         return app
 
 
