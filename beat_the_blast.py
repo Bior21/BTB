@@ -1344,7 +1344,9 @@ class App:
         if key in self.key_directions:
             dx, dy = self.key_directions[key]
             self.game.move(dx, dy)
-        elif key == self.pygame.K_ESCAPE:
+        elif key == self.pygame.K_ESCAPE and sys.platform != "emscripten":
+            # In a browser tab there is no window to close, so Escape would
+            # only stop the game loop and freeze the page.
             self.running = False
 
     def handle_mouse_down(self, position):

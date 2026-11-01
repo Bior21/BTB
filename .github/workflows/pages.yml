@@ -33,7 +33,7 @@ jobs:
         run: python prepare_web.py
 
       - name: Build browser game
-        run: python -m pygbag --build --no_opt --title "Beat the Blast" web-src
+        run: python -m pygbag --build --no_opt --ume_block 0 --title "Beat the Blast" web-src
 
       - uses: actions/configure-pages@v5
 
