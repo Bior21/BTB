@@ -1,13 +1,13 @@
-"""Start Beat the Blast in a browser using pygbag, or on the desktop."""
+"""Start Beat the Blast in a browser or on the desktop."""
 
 import asyncio
 import sys
 
-from beat_the_blast import App, main
+from beat_the_blast import App
 
 
 async def play_in_browser():
-    """Create the game and run frames without blocking the browser."""
+    """Run the game while letting the browser update between frames."""
     app = App()
     await app.run_browser()
 
@@ -16,4 +16,5 @@ if __name__ == "__main__":
     if sys.platform == "emscripten":
         asyncio.run(play_in_browser())
     else:
+        from beat_the_blast import main
         sys.exit(main())
