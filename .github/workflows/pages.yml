@@ -1,0 +1,50 @@
+name: Test and publish BTB
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install desktop test and browser build tools
+        run: python -m pip install -r requirements.txt pygbag==0.9.3
+      - name: Test the game
+        run: python beat_the_blast.py --test
+      - name: Prepare browser source
+        run: |
+          mkdir web-src
+          cp main.py beat_the_blast.py web-src/
+      - name: Build browser game
+        run: python -m pygbag --build --no_opt --title "Beat the Blast" web-src
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: web-src/build/web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publish game
+        id: deployment
+        uses: actions/deploy-pages@v4

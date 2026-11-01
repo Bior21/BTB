@@ -12,6 +12,7 @@ Pass ten mazes and earn enough points to unlock the next level.
 There are 100 levels to complete.
 """
 
+import asyncio
 import doctest
 import math
 import os
@@ -1273,7 +1274,8 @@ class App:
         import pygame
         self.pygame = pygame
         pygame.init()
-        self.screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SCALED)
+        flags = 0 if sys.platform == "emscripten" else pygame.SCALED
+        self.screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT), flags)
         pygame.display.set_caption("Beat the Blast")
         self.fonts = (pygame.font.Font(None, 34), pygame.font.Font(None, 23), pygame.font.Font(None, 20))
         self.clock = pygame.time.Clock()
@@ -1296,16 +1298,27 @@ class App:
     def run(self):
         """Handle input, update time and the sample, and draw frames until the player quits."""
         while self.running:
-            self.game.check_bomb()
-            if self.game.mode in ("ready", "paused"):
-                self.game.demo.tick()
-            for event in self.pygame.event.get():
-                self.handle_event(event)
-            self.game.advance_after_popup()
-            self.buttons = draw_game(self.pygame, self.screen, self.fonts, self.game)
-            self.pygame.display.flip()
+            self.update_frame()
             self.clock.tick(60)
         self.pygame.quit()
+
+    async def run_browser(self):
+        """Draw frames while giving the browser time to handle input and update the page."""
+        while self.running:
+            self.update_frame()
+            await asyncio.sleep(0)
+        self.pygame.quit()
+
+    def update_frame(self):
+        """Check the timer, handle input, and draw one frame for either version."""
+        self.game.check_bomb()
+        if self.game.mode in ("ready", "paused"):
+            self.game.demo.tick()
+        for event in self.pygame.event.get():
+            self.handle_event(event)
+        self.game.advance_after_popup()
+        self.buttons = draw_game(self.pygame, self.screen, self.fonts, self.game)
+        self.pygame.display.flip()
 
     def handle_event(self, event):
         """Send keyboard and mouse events to the matching handler, or handle closing the window."""
