@@ -3,6 +3,9 @@
 import asyncio
 import sys
 
+# pygbag only loads pygame in the browser when main.py imports it directly.
+import pygame  # noqa: F401
+
 from beat_the_blast import App
 
 
