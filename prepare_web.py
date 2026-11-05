@@ -48,6 +48,8 @@ def prepare():
     source = (root / "beat_the_blast.py").read_text()
     (target / "beat_the_blast.py").write_text(browser_source(source))
     shutil.copyfile(root / "main.py", target / "main.py")
+    # The browser cannot use fonts installed on a computer, so ship the game's own.
+    shutil.copytree(root / "fonts", target / "fonts", dirs_exist_ok=True)
 
 
 if __name__ == "__main__":

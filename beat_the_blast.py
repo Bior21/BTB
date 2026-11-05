@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Beat the Blast
 
-Find your way out of a maze before the bomb explodes. Reach any gold exit
+Find your way out of a maze before the bomb explodes. Reach any green flag
 before time runs out, and avoid unnecessary steps, which can also trigger
 an explosion.
 
-Press Start to begin. Drag the blue player or use the arrow keys or WASD
+Press Start to begin. Drag the yellow player or use the arrow keys or WASD
 to move. Pause stops the countdown and hides the maze until you resume.
 
 Pass ten mazes and earn enough points to unlock the next level.
@@ -58,28 +58,53 @@ LEVELS = [(29 + 2 * (level // 5), 21 + 2 * (level // 7), 20 + level // 3)
 DIRECTIONS = [(1, 0), (-1, 0), (0, 1), (0, -1)]
 WINDOW_WIDTH = 960
 WINDOW_HEIGHT = 810
-BACKGROUND = (21, 34, 31)
-WALL = (53, 73, 63)
-CORRIDOR = (16, 26, 24)
-TEXT = (237, 242, 235)
-MUTED = (205, 218, 209)
-DISABLED = (135, 152, 141)
-BLUE = (159, 216, 229)
-GOLD = (232, 200, 140)
-ORANGE = (224, 164, 126)
-GREEN = (195, 223, 139)
-FONT_SIZES = (42, 28, 24)
-BOTTOM_ROW = 732
+
+# Cartoon comic colors.
+SKY = (88, 184, 245)
+SKY_DOTS = (128, 202, 248)
+INK = (27, 27, 27)
+WHITE = (255, 255, 255)
+PAPER = (255, 246, 223)
+YELLOW = (255, 210, 63)
+WALL_ORANGE = (240, 124, 58)
+RED = (232, 54, 43)
+GREEN = (60, 207, 90)
+DARK_GREEN = (30, 140, 60)
+SPARK_ORANGE = (255, 138, 31)
+FUSE_BROWN = (138, 90, 43)
+MUTED = (74, 74, 74)
+LIGHT_GREY = (226, 226, 226)
+LOST_GREY = (190, 190, 190)
+CHECKED_YELLOW = (255, 228, 150)
+DISABLED_FILL = (150, 205, 240)
+DISABLED_TEXT = (60, 118, 160)
+
+# Font files live in the fonts folder next to this file.
+FONT_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
+COMIC_FONT = "Bangers-Regular.ttf"
+TEXT_FONT = "Nunito.ttf"
+
+# Screen areas: the left column of cards, the board, and the bottom row of buttons.
+CARD_LEFT = 30
+CARD_WIDTH = 230
+BOARD_RECT = (286, 96, 644, 604)
+MAZE_AREA = (306, 116, 604, 520)
+BOTTOM_ROW = 728
 BOTTOM_HEIGHT = 54
-INSTRUCTIONS = ["Press Start, then drag the blue dot, tap the maze, or use arrows / WASD.",
-                "Reach any gold exit before the countdown ends. Too many steps also sets off the bomb."]
+
+HELP_LINES = ["Press START, then reach a green flag before the bomb goes off.",
+              "Move with the arrow keys, WASD, the arrow buttons, or by dragging or tapping.",
+              "Every step counts. Run out of steps and the bomb goes off too.",
+              "Take a shortest route for a +250 bonus.",
+              "Pass 10 mazes and earn 5,000 points to unlock the next level.",
+              "PAUSE hides the maze and freezes the countdown. Press M to mute."]
 TIPS = ["Pause hides the maze and freezes the countdown.",
-        "The Steps box turns orange when you are close to the step limit.",
+        "The steps bar turns orange when you are close to the step limit.",
         "Take a shortest route for a +250 bonus.",
         "Unlock the next level: pass 10 mazes and earn 5,000 net level points.",
         "Restarting a live attempt costs 100 points and counts as a failure.",
         "Three failures in a row send you back to the previous level.",
-        "Press M or the Sound button to mute."]
+        "Press M or the sound button to mute."]
 
 
 # ----------------------------------------------------------------------
@@ -90,8 +115,10 @@ TIPS = ["Pause hides the maze and freezes the countdown.",
 class Button:
     """Keep a button's appearance, action, and availability together."""
 
-    def __init__(self, *, label, rect, action, value=0, enabled=True):
+    def __init__(self, *, label, rect, action, value=0, enabled=True, icon=None):
         """Store a button's label, area, action, and whether it can be clicked.
+
+        An icon name such as "left" or "sound_on" draws a picture instead of the label.
 
         >>> button = Button(label="New attempt", rect=None, action="retry")
         >>> button.label, button.action, button.enabled
@@ -102,6 +129,7 @@ class Button:
         self.action = action
         self.value = value
         self.enabled = enabled
+        self.icon = icon
 
 
 # ----------------------------------------------------------------------
@@ -629,7 +657,6 @@ class Game:
         """Start a session at level 1 with zero points and a ready attempt."""
         self.level = 0
         self.highest_unlocked_level = 0
-        self.level_page = 0
         self.solved_counts = [0] * len(LEVELS)
         self.level_points = [0] * len(LEVELS)
         self.failures = [0] * len(LEVELS)
@@ -917,7 +944,6 @@ class Game:
         if level > self.level and not self.level_ready():
             return False
         self.level = level
-        self.level_page = level // 10
         self.prepare_maze()
         return self.new_attempt(False)
 
@@ -944,9 +970,10 @@ class Game:
 
 def maze_geometry(maze):
     """Return (left, top, cell_size) to fit and center this maze in the board area."""
-    cell_size = min(710 // maze.width, 404 // maze.height)
-    left = 220 + (710 - maze.width * cell_size) // 2
-    top = 232 + (404 - maze.height * cell_size) // 2
+    area_left, area_top, area_width, area_height = MAZE_AREA
+    cell_size = min(area_width // maze.width, area_height // maze.height)
+    left = area_left + (area_width - maze.width * cell_size) // 2
+    top = area_top + (area_height - maze.height * cell_size) // 2
     return left, top, cell_size
 
 
@@ -1024,19 +1051,50 @@ def drag_segment(game, before, after):
 # DRAWING AND CONTROLS
 # ----------------------------------------------------------------------
 # Drawing reads the current game state and builds the visible controls.
+# The look is a cartoon comic: thick black outlines, hard black shadows,
+# and bold colors on a sky-blue background.
+
+# ---- Fonts and text ----
+
+def load_font(pygame, file_name, size, bold=False):
+    """Load a font from the fonts folder, or pygame's default font if the file is missing."""
+    try:
+        font = pygame.font.Font(os.path.join(FONT_FOLDER, file_name), size)
+    except (FileNotFoundError, OSError):
+        font = pygame.font.Font(None, size + 6)
+    font.bold = bold
+    return font
+
 
 def make_fonts(pygame):
-    """Return the title, body, and small fonts, sized to stay readable when scaled down."""
-    return tuple(pygame.font.Font(None, size) for size in FONT_SIZES)
+    """Return the fonts by name: comic lettering for headings, Nunito for sentences."""
+    return {"title": load_font(pygame, COMIC_FONT, 54),
+            "stamp": load_font(pygame, COMIC_FONT, 110),
+            "timer": load_font(pygame, COMIC_FONT, 50),
+            "big": load_font(pygame, COMIC_FONT, 36),
+            "level": load_font(pygame, COMIC_FONT, 30),
+            "button": load_font(pygame, COMIC_FONT, 24),
+            "label": load_font(pygame, COMIC_FONT, 21),
+            "text": load_font(pygame, TEXT_FONT, 17, bold=True),
+            "small": load_font(pygame, TEXT_FONT, 15, bold=True)}
 
 
-def draw_text(screen, font, text, position, color=TEXT):
-    """Draw text at the given pixel position."""
+def draw_text(screen, font, text, position, color=INK):
+    """Draw text with its top-left corner at the given pixel position."""
     screen.blit(font.render(text, True, color), position)
 
 
-def draw_wrapped_text(screen, font, text, x, y, width, color=TEXT):
-    """Draw text one word at a time, starting a new line when the width is exceeded."""
+def draw_centered_text(screen, font, text, center, color=INK):
+    """Draw text centered on the given pixel position."""
+    image = font.render(text, True, color)
+    screen.blit(image, image.get_rect(center=center))
+
+
+def draw_wrapped_text(screen, font, text, x, y, width, color=INK):
+    """Draw text one word at a time, starting a new line when the width is exceeded.
+
+    Return the y position just below the last line, so more text can follow it.
+    """
     line = ""
     for word in text.split():
         candidate = (line + " " + word).strip()
@@ -1047,37 +1105,213 @@ def draw_wrapped_text(screen, font, text, x, y, width, color=TEXT):
         else:
             line = candidate
     draw_text(screen, font, line, (x, y), color)
+    return y + font.get_linesize()
+
+
+def comic_text(pygame, font, text, color, outline=3, shadow=4):
+    """Return an image of text with a black outline and a hard black shadow, like a comic title."""
+    ink = font.render(text, True, INK)
+    fill = font.render(text, True, color)
+    width = fill.get_width() + outline * 2 + shadow
+    height = fill.get_height() + outline * 2 + shadow
+    image = pygame.Surface((width, height), pygame.SRCALPHA)
+    # Shadow first, then black copies all around for the outline, then the colored letters on top.
+    image.blit(ink, (outline + shadow, outline + shadow))
+    for dx in range(-outline, outline + 1):
+        for dy in range(-outline, outline + 1):
+            if dx * dx + dy * dy <= outline * outline:
+                image.blit(ink, (outline + dx, outline + dy))
+    image.blit(fill, (outline, outline))
+    return image
+
+
+def format_countdown(seconds):
+    """Return seconds as a stopwatch reading, rounded up to the next tenth of a second.
+
+    >>> format_countdown(31.42)
+    '00:31.5'
+    >>> format_countdown(75)
+    '01:15.0'
+    >>> format_countdown(0)
+    '00:00.0'
+    """
+    tenths = math.ceil(round(seconds * 10, 6))
+    minutes, tenths = divmod(tenths, 600)
+    return f"{minutes:02d}:{tenths // 10:02d}.{tenths % 10}"
+
+
+# ---- Panels and background ----
+
+background_image = None  # Made once by draw_background, then reused every frame.
+
+
+def draw_background(pygame, screen):
+    """Fill the screen with sky blue and small light dots, like comic-book printing.
+
+    Drawing thousands of dots every frame would be slow, so the finished
+    background is saved the first time and copied after that.
+    """
+    global background_image
+    if background_image is None:
+        background_image = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT))
+        background_image.fill(SKY)
+        for y in range(8, WINDOW_HEIGHT, 16):
+            for x in range(8, WINDOW_WIDTH, 16):
+                pygame.draw.circle(background_image, SKY_DOTS, (x, y), 2)
+    screen.blit(background_image, (0, 0))
+
+
+def draw_card(pygame, screen, rect, fill=WHITE, shadow=4):
+    """Draw a comic panel: a hard black shadow, then a filled box with a thick black outline."""
+    pygame.draw.rect(screen, INK, rect.move(shadow, shadow), border_radius=14)
+    pygame.draw.rect(screen, fill, rect, border_radius=14)
+    pygame.draw.rect(screen, INK, rect, width=3, border_radius=14)
+
+
+def draw_shade(pygame, screen):
+    """Darken the whole screen so a panel on top of it stands out."""
+    shade = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+    shade.fill((12, 30, 48, 165))
+    screen.blit(shade, (0, 0))
+
+
+# ---- Pictures: bomb, spark, flag, player, and icons ----
+
+def curve_point(start, bend, end, t):
+    """Return the point a fraction t (0 to 1) along a smooth curve that bends toward bend.
+
+    >>> curve_point((0, 0), (5, 10), (10, 0), 0.5)
+    (5.0, 5.0)
+    """
+    a = (1 - t) ** 2
+    b = 2 * (1 - t) * t
+    c = t ** 2
+    return (a * start[0] + b * bend[0] + c * end[0],
+            a * start[1] + b * bend[1] + c * end[1])
+
+
+def draw_bomb(pygame, screen, center, radius, fuse, spark_size=0, color=INK):
+    """Draw a cartoon bomb with a fuse that is `fuse` long, from 1 (full) to 0 (burned away)."""
+    x, y = center
+    # The fuse follows a curve up from the cap. A shorter fuse stops part of the way along.
+    start = (x + radius * 0.55, y - radius * 0.95)
+    bend = (x + radius * 0.75, y - radius * 1.6)
+    end = (x + radius * 1.35, y - radius * 1.75)
+    fuse_points = [curve_point(start, bend, end, fuse * step / 10) for step in range(11)]
+    if fuse > 0:
+        pygame.draw.lines(screen, FUSE_BROWN, False, fuse_points, max(2, radius // 9))
+    cap = pygame.Rect(0, 0, radius * 0.6, radius * 0.45)
+    cap.center = (x + radius * 0.5, y - radius * 0.82)
+    pygame.draw.rect(screen, (110, 110, 110), cap, border_radius=3)
+    pygame.draw.rect(screen, INK, cap, 2, border_radius=3)
+    pygame.draw.circle(screen, color, center, radius)
+    pygame.draw.circle(screen, INK, center, radius, 2)
+    shine = pygame.Rect(0, 0, radius * 0.5, radius * 0.32)
+    shine.center = (x - radius * 0.35, y - radius * 0.38)
+    pygame.draw.ellipse(screen, (120, 120, 120) if color == INK else WHITE, shine)
+    if spark_size and fuse > 0:
+        draw_spark(pygame, screen, fuse_points[-1], spark_size)
+
+
+def draw_spark(pygame, screen, center, size):
+    """Draw a spark: short orange rays around a yellow dot with a white middle."""
+    x, y = center
+    for index in range(8):
+        angle = index * math.pi / 4
+        tip = (x + math.cos(angle) * size, y + math.sin(angle) * size)
+        pygame.draw.line(screen, SPARK_ORANGE, center, tip, 3)
+    pygame.draw.circle(screen, YELLOW, center, size / 2)
+    pygame.draw.circle(screen, WHITE, center, max(2, size / 5))
+
+
+def draw_flag(pygame, screen, center, size):
+    """Draw a green flag on a black pole to mark an exit."""
+    x, y = center
+    pole_x = x - size * 0.3
+    pole_top = y - size * 0.6
+    pygame.draw.line(screen, INK, (pole_x, pole_top), (pole_x, y + size * 0.5), max(2, size // 8))
+    flag = [(pole_x, pole_top), (x + size * 0.55, pole_top + size * 0.25), (pole_x, pole_top + size * 0.5)]
+    pygame.draw.polygon(screen, GREEN, flag)
+    pygame.draw.polygon(screen, INK, flag, max(1, size // 10))
+
+
+def draw_player(pygame, screen, center, size):
+    """Draw the player: a yellow face with two black eyes."""
+    x, y = center
+    radius = max(4, size * 0.45)
+    pygame.draw.circle(screen, YELLOW, center, radius)
+    pygame.draw.circle(screen, INK, center, radius, max(1, size // 10))
+    for side in (-1, 1):
+        pygame.draw.circle(screen, INK, (x + side * radius * 0.35, y - radius * 0.15), max(1, radius * 0.18))
+
+
+ARROW_DIRECTIONS = {"left": (-1, 0), "right": (1, 0), "up": (0, -1), "down": (0, 1)}
+
+
+def draw_arrow(pygame, screen, center, direction, color, length=11):
+    """Draw an arrow pointing in a direction, such as (1, 0) for right."""
+    x, y = center
+    dx, dy = direction
+    tip = (x + dx * length, y + dy * length)
+    tail = (x - dx * length, y - dy * length)
+    pygame.draw.line(screen, color, tail, tip, 4)
+    # The two short lines of the arrowhead go back from the tip, one on each side.
+    side_x, side_y = -dy, dx
+    for sign in (1, -1):
+        wing = (tip[0] - dx * 7 + side_x * 7 * sign, tip[1] - dy * 7 + side_y * 7 * sign)
+        pygame.draw.line(screen, color, tip, wing, 4)
+
+
+def draw_speaker(pygame, screen, center, color, sound_on):
+    """Draw a speaker with sound waves when sound is on, or with an X when it is muted."""
+    x, y = center
+    body = [(x - 11, y - 4), (x - 6, y - 4), (x + 1, y - 10), (x + 1, y + 10), (x - 6, y + 4), (x - 11, y + 4)]
+    pygame.draw.polygon(screen, color, body)
+    if sound_on:
+        # Each sound wave is a short curve made of points around a circle.
+        for radius in (7, 12):
+            wave = []
+            for step in range(9):
+                angle = -0.8 + step * 0.2
+                wave.append((x + 1 + math.cos(angle) * radius, y + math.sin(angle) * radius))
+            pygame.draw.lines(screen, color, False, wave, 3)
+    else:
+        pygame.draw.line(screen, color, (x + 5, y - 5), (x + 13, y + 5), 3)
+        pygame.draw.line(screen, color, (x + 5, y + 5), (x + 13, y - 5), 3)
+
+
+# ---- Buttons ----
+
+def level_choice_allowed(game, index):
+    """Return whether the player may switch to the level with this zero-based index."""
+    if index < 0 or index >= len(LEVELS) or index > game.highest_unlocked_level:
+        return False
+    return index <= game.level or game.level_ready()
 
 
 def make_buttons(pygame, game, sound_on=True):
-    """Return level, attempt, movement, and sound button descriptions for this frame."""
+    """Return every button for this frame: level arrows, attempt controls, help, sound, and moves."""
     buttons = make_level_buttons(pygame, game)
     buttons.extend(make_attempt_buttons(pygame, game))
+    buttons.append(Button(label="?", rect=pygame.Rect(826, 22, 42, 42), action="help"))
     buttons.append(Button(label="Sound: on" if sound_on else "Sound: off",
-                          rect=pygame.Rect(812, 18, 118, 34), action="sound"))
-    labels = ["<", "^", "v", ">"]
-    directions = [(-1, 0), (0, -1), (0, 1), (1, 0)]
-    for index, (label, direction) in enumerate(zip(labels, directions)):
+                          rect=pygame.Rect(888, 22, 42, 42), action="sound",
+                          icon="sound_on" if sound_on else "sound_off"))
+    for index, name in enumerate(["left", "up", "down", "right"]):
         rect = pygame.Rect(669 + index * 66, BOTTOM_ROW, 60, BOTTOM_HEIGHT)
-        buttons.append(Button(label=label, rect=rect, action="move",
-                              value=direction, enabled=game.mode != "finished"))
+        buttons.append(Button(label=name.title(), rect=rect, action="move", icon=name,
+                              value=ARROW_DIRECTIONS[name], enabled=game.mode != "finished"))
     return buttons
 
 
 def make_level_buttons(pygame, game):
-    """Build ten level buttons and page arrows, enabling only allowed level choices."""
-    buttons = []
-    for offset in range(10):
-        index = game.level_page * 10 + offset
-        rect = pygame.Rect(82 + offset * 79, 182, 75, 34)
-        enabled = index <= game.highest_unlocked_level and (index <= game.level or game.level_ready())
-        buttons.append(Button(label=f"Level {index + 1}", rect=rect,
-                              action="level", value=index, enabled=enabled))
-    buttons.append(Button(label="<", rect=pygame.Rect(30, 182, 42, 34),
-                          action="page", value=-1, enabled=game.level_page > 0))
-    buttons.append(Button(label=">", rect=pygame.Rect(888, 182, 42, 34),
-                          action="page", value=1, enabled=game.level_page < 9))
-    return buttons
+    """Build the two small arrows beside the level name that step one level back or forward."""
+    back = game.level - 1
+    forward = game.level + 1
+    return [Button(label="Back one level", rect=pygame.Rect(456, 24, 36, 36), action="level",
+                   value=back, icon="left", enabled=level_choice_allowed(game, back)),
+            Button(label="Forward one level", rect=pygame.Rect(606, 24, 36, 36), action="level",
+                   value=forward, icon="right", enabled=level_choice_allowed(game, forward))]
 
 
 def make_attempt_buttons(pygame, game):
@@ -1107,222 +1341,366 @@ def make_play_button(pygame, game, can_retry):
                   action="play", enabled=can_retry and game.mode != "finished")
 
 
-def draw_game(pygame, screen, fonts, game, sound_on=True):
-    """Draw the current screen and return its clickable button descriptions."""
-    screen.fill(BACKGROUND)
+def draw_button(pygame, screen, fonts, button):
+    """Draw a comic button: white (yellow for Start/Pause) with a black outline and shadow.
+
+    Disabled buttons are flat and pale blue, so they clearly cannot be clicked.
+    """
+    rect = button.rect
+    if button.enabled:
+        fill = YELLOW if button.action == "play" else WHITE
+        ink = INK
+        pygame.draw.rect(screen, INK, rect.move(4, 4), border_radius=12)
+    else:
+        fill = DISABLED_FILL
+        ink = DISABLED_TEXT
+    pygame.draw.rect(screen, fill, rect, border_radius=12)
+    pygame.draw.rect(screen, ink, rect, 3, border_radius=12)
+    if button.icon in ARROW_DIRECTIONS:
+        length = 11 if rect.width > 40 else 8
+        draw_arrow(pygame, screen, rect.center, ARROW_DIRECTIONS[button.icon], ink, length)
+    elif button.icon in ("sound_on", "sound_off"):
+        draw_speaker(pygame, screen, rect.center, ink, button.icon == "sound_on")
+    else:
+        draw_centered_text(screen, fonts["button"], button.label.upper(), rect.center, ink)
+
+
+# ---- The whole screen ----
+
+def draw_game(pygame, screen, fonts, game, sound_on=True, show_help=False, effect_age=None):
+    """Draw the whole screen and return the buttons that can be clicked right now.
+
+    effect_age is the number of seconds since the attempt finished. The shake,
+    the stamp, and the confetti use it to move.
+    """
+    draw_background(pygame, screen)
     draw_heading(pygame, screen, fonts, game)
     draw_statistics(pygame, screen, fonts, game)
-    draw_board(pygame, screen, fonts, game)
+    draw_board(pygame, screen, fonts, game, effect_age)
     draw_messages(screen, fonts, game)
+    draw_confetti(pygame, screen, game, effect_age)
+    draw_result_stamp(pygame, screen, fonts, game, effect_age)
     buttons = make_buttons(pygame, game, sound_on)
     for button in buttons:
-        draw_button(pygame, screen, fonts[2], game, button)
+        draw_button(pygame, screen, fonts, button)
     if game.level_popup:
-        buttons = draw_level_popup(pygame, screen, fonts, game)
+        return draw_level_popup(pygame, screen, fonts, game)
+    if show_help:
+        return draw_help(pygame, screen, fonts)
     return buttons
 
 
-def draw_board(pygame, screen, fonts, game):
-    """Show the separate sample while ready or paused, and the real maze otherwise."""
+# ---- Top row: title, name sticker, level, and maze dots ----
+
+def draw_heading(pygame, screen, fonts, game):
+    """Draw the title, the "by BIOR" sticker, the level name, and the maze progress dots."""
+    title = comic_text(pygame, fonts["title"], "BEAT THE BLAST", YELLOW)
+    screen.blit(title, (26, 12))
+    draw_name_sticker(pygame, screen, fonts, (26 + title.get_width() + 6, 20))
+    level_name = comic_text(pygame, fonts["level"], f"LEVEL {game.level + 1}", WHITE, outline=2, shadow=3)
+    screen.blit(level_name, level_name.get_rect(center=(549, 43)))
+    draw_maze_dots(pygame, screen, fonts, game)
+
+
+def draw_name_sticker(pygame, screen, fonts, position):
+    """Draw a small tilted red sticker that says "by BIOR"."""
+    text = fonts["label"].render("by BIOR", True, WHITE)
+    sticker = pygame.Surface((text.get_width() + 20, text.get_height() + 8), pygame.SRCALPHA)
+    pygame.draw.rect(sticker, RED, sticker.get_rect(), border_radius=8)
+    pygame.draw.rect(sticker, INK, sticker.get_rect(), 3, border_radius=8)
+    sticker.blit(text, (10, 4))
+    screen.blit(pygame.transform.rotate(sticker, 8), position)
+
+
+def draw_maze_dots(pygame, screen, fonts, game):
+    """Draw ten dots for this level's ten mazes: orange for passed mazes, white for the rest."""
+    passed = game.solved_counts[game.level]
+    for index in range(MAZES_PER_LEVEL):
+        center = (668 + index * 15, 33)
+        pygame.draw.circle(screen, SPARK_ORANGE if index < passed else WHITE, center, 6)
+        pygame.draw.circle(screen, INK, center, 6, 2)
+    maze_number = min(MAZES_PER_LEVEL, passed + (not game.maze.cleared))
+    draw_text(screen, fonts["small"], f"Maze {maze_number} of {MAZES_PER_LEVEL}", (662, 44))
+
+
+# ---- Left column: bomb timer, steps, lives, and points ----
+
+def draw_statistics(pygame, screen, fonts, game):
+    """Draw the four cards in the left column."""
+    draw_bomb_card(pygame, screen, fonts, game)
+    draw_steps_card(pygame, screen, fonts, game)
+    draw_lives_card(pygame, screen, fonts, game)
+    draw_points_card(pygame, screen, fonts, game)
+
+
+def fuse_left(game):
+    """Return how much of the fuse is left, from 1.0 (full) down to 0.0 (burned away)."""
+    if game.failure_reason is not None or game.bomb_seconds <= 0:
+        return 0
+    return game.time_remaining() / game.bomb_seconds
+
+
+def draw_bomb_card(pygame, screen, fonts, game):
+    """Draw the bomb, whose fuse burns down with the countdown, and the countdown itself.
+
+    In the last ten seconds the spark grows and the countdown blinks.
+    """
+    card = pygame.Rect(CARD_LEFT, 96, CARD_WIDTH, 200)
+    draw_card(pygame, screen, card)
+    remaining = game.time_remaining()
+    danger = game.mode == "playing" and remaining <= 10
+    spark = 0
+    if game.mode != "finished":
+        flicker = math.sin(time.perf_counter() * 25) * 2
+        spark = (13 if danger else 9) + flicker
+    draw_bomb(pygame, screen, (card.centerx - 8, 178), 38, fuse_left(game), spark)
+    color = RED
+    if danger and int(time.perf_counter() * 4) % 2:
+        color = INK
+    draw_centered_text(screen, fonts["timer"], format_countdown(remaining), (card.centerx, 262), color)
+
+
+def draw_steps_card(pygame, screen, fonts, game):
+    """Draw the steps taken so far, with a warning when the hidden step limit is close."""
+    low = game.steps_running_low()
+    card = pygame.Rect(CARD_LEFT, 312, CARD_WIDTH, 96)
+    draw_card(pygame, screen, card, CHECKED_YELLOW if low else WHITE)
+    draw_text(screen, fonts["label"], "STEPS TAKEN", (card.x + 16, card.y + 10))
+    draw_text(screen, fonts["big"], str(game.player.steps), (card.x + 16, card.y + 34))
+    if low:
+        draw_text(screen, fonts["small"], "Few steps left!", (card.x + 88, card.y + 50), RED)
+
+
+def draw_lives_card(pygame, screen, fonts, game):
+    """Draw three small bombs; each failure in a row turns one grey."""
+    card = pygame.Rect(CARD_LEFT, 424, CARD_WIDTH, 88)
+    draw_card(pygame, screen, card)
+    draw_text(screen, fonts["label"], "LIVES", (card.x + 16, card.y + 10))
+    lost = min(LOCK_AFTER_FAILURES, game.failures[game.level])
+    for index in range(LOCK_AFTER_FAILURES):
+        is_lost = index >= LOCK_AFTER_FAILURES - lost
+        color = LOST_GREY if is_lost else INK
+        fuse = 0 if is_lost else 0.5
+        draw_bomb(pygame, screen, (card.x + 32 + index * 46, card.y + 60), 14, fuse, 0, color)
+
+
+def draw_points_card(pygame, screen, fonts, game):
+    """Draw the total points and this level's progress toward the points it needs."""
+    card = pygame.Rect(CARD_LEFT, 528, CARD_WIDTH, 102)
+    draw_card(pygame, screen, card)
+    draw_text(screen, fonts["label"], "POINTS", (card.x + 16, card.y + 10))
+    draw_text(screen, fonts["big"], f"{game.total_score:+,}", (card.x + 16, card.y + 34))
+    level_points = f"This level: {game.level_points[game.level]:,} / {LEVEL_POINTS_REQUIRED:,}"
+    draw_text(screen, fonts["small"], level_points, (card.x + 16, card.y + 74), MUTED)
+
+
+# ---- The board: maze, player, exits, and effects ----
+
+def draw_board(pygame, screen, fonts, game, effect_age=None):
+    """Draw the paper board; show the search demo while ready or paused, and the real maze otherwise."""
+    draw_card(pygame, screen, pygame.Rect(BOARD_RECT), PAPER, shadow=6)
     if game.mode in ("ready", "paused"):
         draw_sample(pygame, screen, fonts, game)
         return
-    geometry = maze_geometry(game.maze)
+    left, top, size = maze_geometry(game.maze)
+    shake_x, shake_y = shake_offset(game, effect_age)
+    geometry = (left + shake_x, top + shake_y, size)
     draw_maze(pygame, screen, game.maze, geometry)
     draw_player_path(pygame, screen, game, geometry)
-    draw_player_and_exits(pygame, screen, game, geometry)
-    draw_blast_effect(pygame, screen, game, geometry)
+    for position in game.maze.exits:
+        draw_flag(pygame, screen, cell_center(position, geometry), size)
+    draw_player(pygame, screen, cell_center(game.player.position, geometry), size)
+    draw_blast_effect(pygame, screen, game, geometry, effect_age)
 
 
-def draw_sample(pygame, screen, fonts, game):
-    """Draw the sample maze, checked cells, found path, and BFS or DFS label."""
-    demo = game.demo
-    size = min(710 // demo.maze.width, 372 // demo.maze.height)
-    geometry = (220 + (710 - demo.maze.width * size) // 2, 272, size)
-    pygame.draw.rect(screen, (40, 64, 56), pygame.Rect(485, 232, 180, 28), border_radius=4)
-    draw_centered_text(screen, fonts[2], f"{demo.method} SEARCH", (575, 246))
-    draw_maze(pygame, screen, demo.maze, geometry)
-    for x, y in demo.checked_cells:
-        rect = pygame.Rect(geometry[0] + x * size + 2, geometry[1] + y * size + 2, size - 4, size - 4)
-        pygame.draw.rect(screen, (43, 82, 70), rect)
-    draw_demo_path(pygame, screen, demo, geometry)
-    for position in demo.maze.exits:
-        pygame.draw.circle(screen, GOLD, cell_center(position, geometry), max(3, size // 4))
-    pygame.draw.circle(screen, BLUE, cell_center(demo.current, geometry), max(3, size // 5))
-
-
-def draw_demo_path(pygame, screen, demo, geometry):
-    """Draw the sample search's found path in green once an exit has been reached."""
-    if not demo.found or len(demo.path) < 2:
-        return
-    points = [cell_center(position, geometry) for position in demo.path]
-    pygame.draw.lines(screen, GREEN, False, points, max(2, geometry[2] // 4))
-
-
-def draw_centered_text(screen, font, text, center, color=TEXT):
-    """Draw text centered on the requested pixel position."""
-    image = font.render(text, True, color)
-    screen.blit(image, image.get_rect(center=center))
-
-
-def draw_popup_badge(pygame, screen):
-    """Draw a gold circle with a dark check mark above the completion message."""
-    pygame.draw.circle(screen, GOLD, (480, 301), 27)
-    pygame.draw.lines(screen, BACKGROUND, False, [(467, 301), (477, 310), (494, 291)], 4)
-
-
-def draw_level_popup(pygame, screen, fonts, game):
-    """Draw the level celebration and return no buttons while it covers the screen."""
-    shade = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
-    shade.fill((9, 18, 14, 175))
-    screen.blit(shade, (0, 0))
-    pygame.draw.rect(screen, (10, 20, 16), pygame.Rect(276, 251, 420, 190), border_radius=22)
-    pygame.draw.rect(screen, (43, 65, 54), pygame.Rect(270, 245, 420, 190), border_radius=22)
-    draw_popup_badge(pygame, screen)
-    draw_centered_text(screen, fonts[0], f"Level {game.level + 1} passed!", (480, 357))
-    subtitle = f"Level {game.level + 2} unlocked!"
-    if game.level == len(LEVELS) - 1:
-        subtitle = "All 100 levels complete!"
-    draw_centered_text(screen, fonts[1], subtitle, (480, 392), GREEN)
-    return []
-
-
-def draw_heading(pygame, screen, fonts, game):
-    """Draw the game title, level progress, and indented instructions."""
-    title_font, font, small_font = fonts
-    draw_text(screen, title_font, "BEAT THE BLAST", (30, 18))
-    maze_number = min(MAZES_PER_LEVEL, game.solved_counts[game.level] + (not game.maze.cleared))
-    progress = small_font.render(f"Level {game.level + 1}/100 · Maze {maze_number}/10", True, MUTED)
-    screen.blit(progress, progress.get_rect(midright=(796, 35)))
-    for index, instruction in enumerate(INSTRUCTIONS):
-        draw_instruction(pygame, screen, small_font, instruction, 72 + index * 28)
-    draw_instruction(pygame, screen, small_font, current_tip(game), 140, "Tip: ")
-
-
-def current_tip(game):
-    """Return one tip, moving to the next each time a maze is passed.
-
-    Showing one tip at a time keeps the opening screen short.
-    """
-    return TIPS[sum(game.solved_counts) % len(TIPS)]
-
-
-def draw_instruction(pygame, screen, font, text, top, label=""):
-    """Draw one instruction beside its four-diamond bullet, after an optional gold label."""
-    color = GOLD if label else MUTED
-    for dx, dy in [(0, -3), (-3, 0), (3, 0), (0, 3)]:
-        x, y = 40 + dx, top + 8 + dy
-        points = [(x, y - 2), (x + 2, y), (x, y + 2), (x - 2, y)]
-        pygame.draw.polygon(screen, color, points)
-    left = 54
-    if label:
-        draw_text(screen, font, label, (left, top), GOLD)
-        left += font.size(label)[0]
-    draw_text(screen, font, text, (left, top), MUTED)
-
-
-def draw_statistics(pygame, screen, fonts, game):
-    """Draw countdown, steps, points, and failure counts in the left sidebar."""
-    remaining = math.ceil(game.time_remaining() * 10) / 10
-    countdown = "Ready" if game.mode == "ready" else f"{remaining:.1f}s"
-    values = [("Bomb countdown", countdown),
-              ("Steps", str(game.player.steps)),
-              ("Points", f"{game.total_score:+d}"),
-              ("Negative finishes", f"{game.failures[game.level]} / {LOCK_AFTER_FAILURES}")]
-    for index, (label, value) in enumerate(values):
-        rect = pygame.Rect(30, 232 + index * 98, 170, 82)
-        low_steps = label == "Steps" and game.steps_running_low()
-        low_time = label == "Bomb countdown" and remaining <= 10
-        color = ORANGE if low_time or low_steps else TEXT
-        draw_stat_box(pygame, screen, fonts, rect, label, value, color)
-        if label == "Points":
-            detail = f"Level {game.level_points[game.level]:,} / {LEVEL_POINTS_REQUIRED:,}"
-            draw_text(screen, fonts[2], detail, (rect.x + 12, rect.y + 58), MUTED)
-        if low_steps:
-            draw_text(screen, fonts[2], "Few steps left!", (rect.x + 12, rect.y + 58), ORANGE)
-
-
-def draw_stat_box(pygame, screen, fonts, rect, label, value, value_color=TEXT):
-    """Draw a statistic label above its value, such as Bomb countdown above 12.4s."""
-    pygame.draw.rect(screen, (40, 64, 56), rect, border_radius=4)
-    draw_text(screen, fonts[2], label, (rect.x + 12, rect.y + 10), MUTED)
-    draw_text(screen, fonts[1], value, (rect.x + 12, rect.y + 32), value_color)
-
-
-def draw_blast_effect(pygame, screen, game, geometry):
-    """Draw a static burst around the player after an explosion, clipped to the maze."""
-    if game.failure_reason is None:
-        return
-    previous_clip = screen.get_clip()
-    left, top, size = geometry
-    screen.set_clip(pygame.Rect(left, top, game.maze.width * size, game.maze.height * size))
-    x, y = cell_center(game.player.position, geometry)
-    radius = max(12, geometry[2])
-    pygame.draw.circle(screen, ORANGE, (x, y), radius, 3)
-    for index in range(8):
-        angle = index * math.pi / 4
-        inner = (x + math.cos(angle) * radius * 1.4, y + math.sin(angle) * radius * 1.4)
-        outer = (x + math.cos(angle) * radius * 1.9, y + math.sin(angle) * radius * 1.9)
-        pygame.draw.line(screen, GOLD, inner, outer, 2)
-    screen.set_clip(previous_clip)
+def shake_offset(game, effect_age):
+    """Return how far to shift the maze while it shakes, for a moment after the bomb goes off."""
+    if game.failure_reason is None or effect_age is None or effect_age > 0.6:
+        return (0, 0)
+    strength = 9 * (1 - effect_age / 0.6)
+    return (round(math.sin(effect_age * 70) * strength), round(math.cos(effect_age * 55) * strength))
 
 
 def draw_maze(pygame, screen, maze, geometry):
-    """Draw each grid cell as either a wall or an open path."""
+    """Draw the maze on paper: orange walls with a thin black outline."""
     left, top, size = geometry
+    pygame.draw.rect(screen, PAPER, pygame.Rect(left, top, maze.width * size, maze.height * size))
+    walls = []
     for y, row in enumerate(maze.grid):
         for x, wall in enumerate(row):
-            rect = pygame.Rect(left + x * size, top + y * size, size, size)
-            pygame.draw.rect(screen, WALL if wall else CORRIDOR, rect)
+            if wall:
+                walls.append(pygame.Rect(left + x * size, top + y * size, size, size))
+    # Black squares a little bigger than each wall go down first, so an outline shows around the orange.
+    edge = max(1, size // 8)
+    for wall in walls:
+        pygame.draw.rect(screen, INK, wall.inflate(edge * 2, edge * 2))
+    for wall in walls:
+        pygame.draw.rect(screen, WALL_ORANGE, wall)
 
 
 def draw_player_path(pygame, screen, game, geometry):
-    """Draw the route the player actually traveled.
+    """Draw the route the player actually traveled: red, or green after a shortest-route finish.
 
-    A shortest-route finish turns that same route green. The game does not draw
-    a suggested solution, since finding the route is the challenge.
+    The game never draws a suggested solution, since finding the route is the challenge.
     """
     if len(game.player.path) < 2:
         return
+    points = [cell_center(position, geometry) for position in game.player.path]
+    color = GREEN if game.perfect else RED
+    pygame.draw.lines(screen, color, False, points, max(2, geometry[2] // 6))
+
+
+def draw_blast_effect(pygame, screen, game, geometry, effect_age=None):
+    """After an explosion, draw a comic starburst where the player was. It grows quickly at first."""
+    if game.failure_reason is None:
+        return
+    grow = 1 if effect_age is None else min(1, 0.3 + effect_age / 0.25)
+    radius = max(30, geometry[2] * 3) * grow
+    x, y = cell_center(game.player.position, geometry)
     points = []
-    for position in game.player.path:
-        points.append(cell_center(position, geometry))
-    color = GREEN if game.perfect else ORANGE
-    pygame.draw.lines(screen, color, False, points, max(2, geometry[2] // 7))
+    for index in range(24):
+        angle = index * math.pi / 12
+        reach = radius if index % 2 == 0 else radius * 0.55
+        points.append((x + math.cos(angle) * reach, y + math.sin(angle) * reach))
+    screen.set_clip(pygame.Rect(BOARD_RECT))
+    pygame.draw.polygon(screen, YELLOW, points)
+    pygame.draw.polygon(screen, INK, points, 3)
+    pygame.draw.circle(screen, RED, (x, y), radius * 0.35)
+    pygame.draw.circle(screen, INK, (x, y), radius * 0.35, 3)
+    screen.set_clip(None)
 
 
-def draw_player_and_exits(pygame, screen, game, geometry):
-    """Draw gold exit squares and the blue player over the maze."""
-    size = geometry[2]
-    for position in game.maze.exits:
-        marker_size = max(3, size // 2)
-        exit_rect = pygame.Rect(0, 0, marker_size, marker_size)
-        exit_rect.center = cell_center(position, geometry)
-        pygame.draw.rect(screen, GOLD, exit_rect)
-    player_center = cell_center(game.player.position, geometry)
-    pygame.draw.circle(screen, BLUE, player_center, max(2, size // 4))
+CONFETTI_COLORS = [YELLOW, RED, GREEN, SKY, SPARK_ORANGE]
+
+
+def draw_confetti(pygame, screen, game, effect_age):
+    """After an escape, let confetti fall over the board for three seconds."""
+    if game.mode != "finished" or not game.passed or effect_age is None or effect_age > 3:
+        return
+    board = pygame.Rect(BOARD_RECT)
+    # The same seed gives the same pieces every frame, so each piece falls smoothly.
+    chance = random.Random(7)
+    screen.set_clip(board)
+    for index in range(70):
+        x = board.x + chance.random() * board.width
+        start_y = board.y - chance.random() * 300
+        speed = 180 + chance.random() * 220
+        flutter = abs(math.sin(effect_age * 8 + index))  # Pieces flip over as they fall.
+        piece = pygame.Rect(0, 0, 10, max(2, 14 * flutter))
+        piece.center = (x + math.sin(effect_age * 3 + index) * 12, start_y + speed * effect_age)
+        pygame.draw.rect(screen, CONFETTI_COLORS[index % len(CONFETTI_COLORS)], piece)
+    screen.set_clip(None)
+
+
+def result_words(game):
+    """Return the big stamp word and the one-line summary for a finished attempt."""
+    if game.passed:
+        word = "PERFECT!" if game.perfect else "ESCAPED!"
+        return word, f"{game.attempt_score:+,} points · {game.time_remaining():.1f}s left"
+    reasons = {"main": "Out of time", "steps": "Too many steps"}
+    reason = reasons.get(game.failure_reason, "Attempt abandoned")
+    return "BOOM!", f"{reason} · {game.attempt_score:+,} points"
+
+
+def draw_result_stamp(pygame, screen, fonts, game, effect_age):
+    """After an attempt, stamp BOOM!, ESCAPED!, or PERFECT! across the maze, with a summary under it.
+
+    The stamp starts big and quickly shrinks into place, like it was slapped on.
+    """
+    if game.mode != "finished" or game.level_popup:
+        return
+    word, summary = result_words(game)
+    scale = 1.0 if effect_age is None else max(1.0, 1.6 - effect_age * 3)
+    stamp = comic_text(pygame, fonts["stamp"], word, YELLOW, outline=4, shadow=7)
+    stamp = pygame.transform.rotozoom(stamp, 8, scale)
+    center_x = MAZE_AREA[0] + MAZE_AREA[2] // 2
+    screen.blit(stamp, stamp.get_rect(center=(center_x, 350)))
+    text = fonts["text"].render(summary, True, INK)
+    label = pygame.Surface((text.get_width() + 28, text.get_height() + 12), pygame.SRCALPHA)
+    pygame.draw.rect(label, WHITE, label.get_rect(), border_radius=10)
+    pygame.draw.rect(label, INK, label.get_rect(), 3, border_radius=10)
+    label.blit(text, (14, 6))
+    label = pygame.transform.rotate(label, 8)
+    screen.blit(label, label.get_rect(center=(center_x + 6, 432)))
+
+
+def draw_sample(pygame, screen, fonts, game):
+    """While waiting or paused, show the BFS or DFS search working through a sample maze."""
+    demo = game.demo
+    geometry = maze_geometry(demo.maze)
+    left, top, size = geometry
+    draw_maze(pygame, screen, demo.maze, geometry)
+    for x, y in demo.checked_cells:
+        pygame.draw.rect(screen, CHECKED_YELLOW, pygame.Rect(left + x * size, top + y * size, size, size))
+    draw_demo_path(pygame, screen, demo, geometry)
+    for position in demo.maze.exits:
+        draw_flag(pygame, screen, cell_center(position, geometry), size)
+    draw_player(pygame, screen, cell_center(demo.current, geometry), size)
+    # A label above the sample says which search is running.
+    chip = pygame.Rect(0, 0, 180, 32)
+    chip.center = (MAZE_AREA[0] + MAZE_AREA[2] // 2, 128)
+    pygame.draw.rect(screen, YELLOW, chip, border_radius=10)
+    pygame.draw.rect(screen, INK, chip, 3, border_radius=10)
+    draw_centered_text(screen, fonts["button"], f"{demo.method} SEARCH", chip.center)
+
+
+def draw_demo_path(pygame, screen, demo, geometry):
+    """Draw the sample search's found path in green once it reaches the exit."""
+    if not demo.found or len(demo.path) < 2:
+        return
+    points = [cell_center(position, geometry) for position in demo.path]
+    pygame.draw.lines(screen, GREEN, False, points, max(2, geometry[2] // 3))
+
+
+def current_tip(game):
+    """Return one tip, moving to the next each time a maze is passed."""
+    return TIPS[sum(game.solved_counts) % len(TIPS)]
 
 
 def draw_messages(screen, fonts, game):
-    """Draw the attempt message and, after a finish, its score and active time."""
+    """Show the latest message under the maze, or a tip when there is nothing to report."""
     if game.level_complete_notice:
         return
-    message = game.message
-    if game.mode == "finished":
-        message += f" Score: {game.attempt_score:+d}. Time: {game.final_time:.1f}s."
-    color = ORANGE if game.failure_reason else (GREEN if game.perfect else TEXT)
-    draw_wrapped_text(screen, fonts[1], message, 220, 656, 710, color)
+    if game.message:
+        text = game.message
+        color = RED if game.failure_reason else (DARK_GREEN if game.perfect else INK)
+    elif game.mode == "paused":
+        text, color = "Paused. Your maze stays hidden until you press RESUME.", INK
+    else:
+        text, color = "Tip: " + current_tip(game), MUTED
+    left, top, width, height = MAZE_AREA
+    draw_wrapped_text(screen, fonts["small"], text, left, top + height + 10, width, color)
 
 
-def draw_button(pygame, screen, font, game, button):
-    """Draw a button using its label, area, enabled state, and level selection."""
-    fill = (40, 64, 56) if button.enabled else (31, 43, 39)
-    if button.action == "level" and button.value == game.level:
-        fill = (71, 95, 65)
-    pygame.draw.rect(screen, fill, button.rect, border_radius=4)
-    ink = TEXT if button.enabled else DISABLED
-    text = font.render(button.label, True, ink)
-    screen.blit(text, text.get_rect(center=button.rect.center))
+# ---- Pop-up panels ----
+
+def draw_level_popup(pygame, screen, fonts, game):
+    """Celebrate a passed level over a darkened screen; return no buttons while it shows."""
+    draw_shade(pygame, screen)
+    draw_card(pygame, screen, pygame.Rect(240, 250, 480, 200), WHITE, shadow=6)
+    title = comic_text(pygame, fonts["title"], f"LEVEL {game.level + 1} PASSED!", YELLOW)
+    screen.blit(title, title.get_rect(center=(480, 322)))
+    subtitle = f"Level {game.level + 2} unlocked!"
+    if game.level == len(LEVELS) - 1:
+        subtitle = "All 100 levels complete!"
+    draw_centered_text(screen, fonts["text"], subtitle, (480, 392), DARK_GREEN)
+    return []
+
+
+def draw_help(pygame, screen, fonts):
+    """Draw the How to play panel and return its one button, which closes the panel."""
+    draw_shade(pygame, screen)
+    draw_card(pygame, screen, pygame.Rect(170, 140, 620, 490), WHITE, shadow=6)
+    title = comic_text(pygame, fonts["title"], "HOW TO PLAY", YELLOW)
+    screen.blit(title, title.get_rect(center=(480, 192)))
+    top = 248
+    for line in HELP_LINES:
+        pygame.draw.circle(screen, SPARK_ORANGE, (208, top + 11), 6)
+        pygame.draw.circle(screen, INK, (208, top + 11), 6, 2)
+        top = draw_wrapped_text(screen, fonts["text"], line, 226, top, 530) + 18
+    close = Button(label="Got it!", rect=pygame.Rect(405, 556, 150, 52), action="help")
+    draw_button(pygame, screen, fonts, close)
+    return [close]
 
 
 # ----------------------------------------------------------------------
@@ -1437,6 +1815,8 @@ class App:
         self.last_popup = False
         self.last_beat = None
         self.warned = False
+        self.show_help = True      # How to play opens when the game starts.
+        self.finished_at = None    # When the current attempt finished, for animations.
 
     def make_key_directions(self):
         """Return the cell movement for each arrow or WASD key."""
@@ -1470,8 +1850,26 @@ class App:
         self.game.advance_after_popup()
         self.play_sounds()
         self.buttons = draw_game(self.pygame, self.screen, self.fonts, self.game,
-                                 self.sounds.enabled)
+                                 self.sounds.enabled, self.show_help, self.update_effect_age())
         self.pygame.display.flip()
+
+    def update_effect_age(self):
+        """Return seconds since the attempt finished, or None while it is not finished.
+
+        The blast shake, the stamp, and the confetti use this to animate.
+        """
+        if self.game.mode != "finished":
+            self.finished_at = None
+            return None
+        if self.finished_at is None:
+            self.finished_at = time.perf_counter()
+        return time.perf_counter() - self.finished_at
+
+    def toggle_help(self):
+        """Open or close How to play. Opening it during play pauses the countdown first."""
+        if not self.show_help and self.game.mode == "playing":
+            self.game.toggle_play()
+        self.show_help = not self.show_help
 
     def play_sounds(self):
         """Tick with the countdown, warn on low steps, and mark how an attempt ended.
@@ -1565,13 +1963,13 @@ class App:
         elif action == "move":
             dx, dy = value
             self.game.move(dx, dy)
-        elif action == "page":
-            self.game.level_page = min(9, max(0, self.game.level_page + value))
         elif action == "play":
             self.dragging = False
             self.game.toggle_play()
         elif action == "sound":
             self.sounds.toggle()
+        elif action == "help":
+            self.toggle_help()
 
 
 # Keep the actual sample class available while tests replace SampleMaze.
@@ -2109,6 +2507,18 @@ class InterfaceTests(unittest.TestCase):
         app.handle_key(pygame.K_m)
         self.assertTrue(app.sounds.enabled)
 
+    def test_help_button_pauses_play_and_closes_again(self):
+        """Opening How to play during an attempt pauses it; Got it! closes the panel."""
+        app = self.make_app()
+        self.game.toggle_play()
+        app.perform_action("help", 0)
+        self.assertTrue(app.show_help)
+        self.assertEqual(self.game.mode, "paused")
+        buttons = draw_game(pygame, self.screen, self.fonts, self.game, show_help=True)
+        self.assertEqual([button.action for button in buttons], ["help"])
+        app.perform_action("help", 0)
+        self.assertFalse(app.show_help)
+
     def make_app(self):
         """Use App's real input methods without opening its scaled window."""
         app = App.__new__(App)
@@ -2119,6 +2529,8 @@ class InterfaceTests(unittest.TestCase):
         app.buttons = []
         app.key_directions = app.make_key_directions()
         app.sounds = Sounds(pygame)
+        app.show_help = False
+        app.finished_at = None
         return app
 
 
