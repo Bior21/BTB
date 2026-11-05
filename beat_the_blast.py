@@ -57,7 +57,7 @@ LEVELS = [(29 + 2 * (level // 5), 21 + 2 * (level // 7), 20 + level // 3)
           for level in range(100)]
 DIRECTIONS = [(1, 0), (-1, 0), (0, 1), (0, -1)]
 WINDOW_WIDTH = 960
-WINDOW_HEIGHT = 810
+WINDOW_HEIGHT = 720    # short enough to fit a laptop screen with the menu bar and Dock
 
 # Cartoon comic colors.
 SKY = (88, 184, 245)
@@ -87,9 +87,10 @@ TEXT_FONT = "Nunito.ttf"
 # Screen areas: the left column of cards, the board, and the bottom row of buttons.
 CARD_LEFT = 30
 CARD_WIDTH = 230
-BOARD_RECT = (286, 96, 644, 604)
-MAZE_AREA = (306, 116, 604, 520)
-BOTTOM_ROW = 728
+BOARD_RECT = (286, 84, 644, 528)
+MAZE_AREA = (306, 100, 604, 452)
+SAMPLE_AREA = (306, 136, 604, 416)    # below the "BFS SEARCH" label
+BOTTOM_ROW = 636
 BOTTOM_HEIGHT = 54
 
 HELP_LINES = ["Press START, then reach a green flag before the bomb goes off.",
@@ -968,9 +969,9 @@ class Game:
 # ----------------------------------------------------------------------
 # Convert cells to pixels for drawing, and pixels back to cells for input.
 
-def maze_geometry(maze):
-    """Return (left, top, cell_size) to fit and center this maze in the board area."""
-    area_left, area_top, area_width, area_height = MAZE_AREA
+def maze_geometry(maze, area=MAZE_AREA):
+    """Return (left, top, cell_size) to fit and center this maze inside an area of the board."""
+    area_left, area_top, area_width, area_height = area
     cell_size = min(area_width // maze.width, area_height // maze.height)
     left = area_left + (area_width - maze.width * cell_size) // 2
     top = area_top + (area_height - maze.height * cell_size) // 2
@@ -1445,7 +1446,7 @@ def draw_bomb_card(pygame, screen, fonts, game):
 
     In the last ten seconds the spark grows and the countdown blinks.
     """
-    card = pygame.Rect(CARD_LEFT, 96, CARD_WIDTH, 200)
+    card = pygame.Rect(CARD_LEFT, 84, CARD_WIDTH, 192)
     draw_card(pygame, screen, card)
     remaining = game.time_remaining()
     danger = game.mode == "playing" and remaining <= 10
@@ -1453,17 +1454,17 @@ def draw_bomb_card(pygame, screen, fonts, game):
     if game.mode != "finished":
         flicker = math.sin(time.perf_counter() * 25) * 2
         spark = (13 if danger else 9) + flicker
-    draw_bomb(pygame, screen, (card.centerx - 8, 178), 38, fuse_left(game), spark)
+    draw_bomb(pygame, screen, (card.centerx - 8, card.y + 82), 38, fuse_left(game), spark)
     color = RED
     if danger and int(time.perf_counter() * 4) % 2:
         color = INK
-    draw_centered_text(screen, fonts["timer"], format_countdown(remaining), (card.centerx, 262), color)
+    draw_centered_text(screen, fonts["timer"], format_countdown(remaining), (card.centerx, card.bottom - 34), color)
 
 
 def draw_steps_card(pygame, screen, fonts, game):
     """Draw the steps taken so far, with a warning when the hidden step limit is close."""
     low = game.steps_running_low()
-    card = pygame.Rect(CARD_LEFT, 312, CARD_WIDTH, 96)
+    card = pygame.Rect(CARD_LEFT, 288, CARD_WIDTH, 96)
     draw_card(pygame, screen, card, CHECKED_YELLOW if low else WHITE)
     draw_text(screen, fonts["label"], "STEPS TAKEN", (card.x + 16, card.y + 10))
     draw_text(screen, fonts["big"], str(game.player.steps), (card.x + 16, card.y + 34))
@@ -1473,7 +1474,7 @@ def draw_steps_card(pygame, screen, fonts, game):
 
 def draw_lives_card(pygame, screen, fonts, game):
     """Draw three small bombs; each failure in a row turns one grey."""
-    card = pygame.Rect(CARD_LEFT, 424, CARD_WIDTH, 88)
+    card = pygame.Rect(CARD_LEFT, 396, CARD_WIDTH, 96)
     draw_card(pygame, screen, card)
     draw_text(screen, fonts["label"], "LIVES", (card.x + 16, card.y + 10))
     lost = min(LOCK_AFTER_FAILURES, game.failures[game.level])
@@ -1481,17 +1482,17 @@ def draw_lives_card(pygame, screen, fonts, game):
         is_lost = index >= LOCK_AFTER_FAILURES - lost
         color = LOST_GREY if is_lost else INK
         fuse = 0 if is_lost else 0.5
-        draw_bomb(pygame, screen, (card.x + 32 + index * 46, card.y + 60), 14, fuse, 0, color)
+        draw_bomb(pygame, screen, (card.x + 32 + index * 46, card.y + 62), 14, fuse, 0, color)
 
 
 def draw_points_card(pygame, screen, fonts, game):
     """Draw the total points and this level's progress toward the points it needs."""
-    card = pygame.Rect(CARD_LEFT, 528, CARD_WIDTH, 102)
+    card = pygame.Rect(CARD_LEFT, 504, CARD_WIDTH, 108)
     draw_card(pygame, screen, card)
     draw_text(screen, fonts["label"], "POINTS", (card.x + 16, card.y + 10))
     draw_text(screen, fonts["big"], f"{game.total_score:+,}", (card.x + 16, card.y + 34))
     level_points = f"This level: {game.level_points[game.level]:,} / {LEVEL_POINTS_REQUIRED:,}"
-    draw_text(screen, fonts["small"], level_points, (card.x + 16, card.y + 74), MUTED)
+    draw_text(screen, fonts["small"], level_points, (card.x + 16, card.y + 78), MUTED)
 
 
 # ---- The board: maze, player, exits, and effects ----
@@ -1614,20 +1615,20 @@ def draw_result_stamp(pygame, screen, fonts, game, effect_age):
     stamp = comic_text(pygame, fonts["stamp"], word, YELLOW, outline=4, shadow=7)
     stamp = pygame.transform.rotozoom(stamp, 8, scale)
     center_x = MAZE_AREA[0] + MAZE_AREA[2] // 2
-    screen.blit(stamp, stamp.get_rect(center=(center_x, 350)))
+    screen.blit(stamp, stamp.get_rect(center=(center_x, 300)))
     text = fonts["text"].render(summary, True, INK)
     label = pygame.Surface((text.get_width() + 28, text.get_height() + 12), pygame.SRCALPHA)
     pygame.draw.rect(label, WHITE, label.get_rect(), border_radius=10)
     pygame.draw.rect(label, INK, label.get_rect(), 3, border_radius=10)
     label.blit(text, (14, 6))
     label = pygame.transform.rotate(label, 8)
-    screen.blit(label, label.get_rect(center=(center_x + 6, 432)))
+    screen.blit(label, label.get_rect(center=(center_x + 6, 382)))
 
 
 def draw_sample(pygame, screen, fonts, game):
     """While waiting or paused, show the BFS or DFS search working through a sample maze."""
     demo = game.demo
-    geometry = maze_geometry(demo.maze)
+    geometry = maze_geometry(demo.maze, SAMPLE_AREA)
     left, top, size = geometry
     draw_maze(pygame, screen, demo.maze, geometry)
     for x, y in demo.checked_cells:
@@ -1638,7 +1639,7 @@ def draw_sample(pygame, screen, fonts, game):
     draw_player(pygame, screen, cell_center(demo.current, geometry), size)
     # A label above the sample says which search is running.
     chip = pygame.Rect(0, 0, 180, 32)
-    chip.center = (MAZE_AREA[0] + MAZE_AREA[2] // 2, 128)
+    chip.center = (MAZE_AREA[0] + MAZE_AREA[2] // 2, 116)
     pygame.draw.rect(screen, YELLOW, chip, border_radius=10)
     pygame.draw.rect(screen, INK, chip, 3, border_radius=10)
     draw_centered_text(screen, fonts["button"], f"{demo.method} SEARCH", chip.center)
@@ -1677,28 +1678,28 @@ def draw_messages(screen, fonts, game):
 def draw_level_popup(pygame, screen, fonts, game):
     """Celebrate a passed level over a darkened screen; return no buttons while it shows."""
     draw_shade(pygame, screen)
-    draw_card(pygame, screen, pygame.Rect(240, 250, 480, 200), WHITE, shadow=6)
+    draw_card(pygame, screen, pygame.Rect(240, 260, 480, 200), WHITE, shadow=6)
     title = comic_text(pygame, fonts["title"], f"LEVEL {game.level + 1} PASSED!", YELLOW)
-    screen.blit(title, title.get_rect(center=(480, 322)))
+    screen.blit(title, title.get_rect(center=(480, 332)))
     subtitle = f"Level {game.level + 2} unlocked!"
     if game.level == len(LEVELS) - 1:
         subtitle = "All 100 levels complete!"
-    draw_centered_text(screen, fonts["text"], subtitle, (480, 392), DARK_GREEN)
+    draw_centered_text(screen, fonts["text"], subtitle, (480, 402), DARK_GREEN)
     return []
 
 
 def draw_help(pygame, screen, fonts):
     """Draw the How to play panel and return its one button, which closes the panel."""
     draw_shade(pygame, screen)
-    draw_card(pygame, screen, pygame.Rect(170, 140, 620, 490), WHITE, shadow=6)
+    draw_card(pygame, screen, pygame.Rect(170, 115, 620, 490), WHITE, shadow=6)
     title = comic_text(pygame, fonts["title"], "HOW TO PLAY", YELLOW)
-    screen.blit(title, title.get_rect(center=(480, 192)))
-    top = 248
+    screen.blit(title, title.get_rect(center=(480, 167)))
+    top = 223
     for line in HELP_LINES:
         pygame.draw.circle(screen, SPARK_ORANGE, (208, top + 11), 6)
         pygame.draw.circle(screen, INK, (208, top + 11), 6, 2)
         top = draw_wrapped_text(screen, fonts["text"], line, 226, top, 530) + 18
-    close = Button(label="Got it!", rect=pygame.Rect(405, 556, 150, 52), action="help")
+    close = Button(label="Got it!", rect=pygame.Rect(405, 531, 150, 52), action="help")
     draw_button(pygame, screen, fonts, close)
     return [close]
 
@@ -2436,7 +2437,7 @@ class InterfaceTests(unittest.TestCase):
         """Create an offscreen display and tiny real maze for each test."""
         pygame.init()
         self.addCleanup(pygame.quit)
-        self.screen = pygame.display.set_mode((960, 810))
+        self.screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
         self.fonts = make_fonts(pygame)
         maze_patch = patch(__name__ + '.Maze', TinyMaze)
         self.addCleanup(maze_patch.stop)
